@@ -20,14 +20,17 @@ __global__ void renderScene(Scene* scene, ViewRender* view) {
 
 	float3 finalColor = make_float3(0, 0, 0);
 	for (int sample = 0; sample < view->samples; sample++) {
-		float3 sampleColor = make_float3(1, 1, 1);
+
+		//What color should be the starting point?
+		float3 sampleColor = make_float3(1);
 		//Cast our ray
-		Ray ray = scene->camera.getRay(static_cast<float>(x) / view->width, static_cast<float>(y) / view->height, static_cast<float>(view->height) / view->width);
+		Ray ray = scene->camera.getRay((x + curand_uniform(&randomState) * 2 - 0.5f) / view->width, (y + curand_uniform(&randomState) * 2 - 0.5f) / view->height, static_cast<float>(view->height) / view->width);
 		Hit hit;
-		for (int bounce = 0; bounce < view->maxBounces; bounce++) {
+		int bounce = 0;
+		for (; bounce < view->maxBounces; bounce++) {
 			hit = scene->raytrace(ray, hit.actor);
 			if (!hit.hit) {
-				//we hit the world background
+				//the world background
 				float sunStrength = 14;
 				float size = 0.05f;
 				float3 sunColor = make_float3(sunStrength);
@@ -39,6 +42,9 @@ __global__ void renderScene(Scene* scene, ViewRender* view) {
 			}
 			hit.actor->material.color(hit, ray, sampleColor, &randomState);
 		}
+		//Failed to hit a light source
+		if (bounce >= view->maxBounces) sampleColor *= 0;
+
 		finalColor += sampleColor;
 	}
 	finalColor /= view->samples;
@@ -64,7 +70,7 @@ int main() {
 	//Render settings!
 	new (d_view) ViewRender(1920, 1080, 16, 16); //be carefull with placement new....
 	d_view->maxBounces = 4;
-	d_view->samples = 1000;
+	d_view->samples = 400;
 
 	Camera camera = Camera({ 0,0,0.3f }, { 1,1,0.2f });
 
@@ -78,7 +84,7 @@ int main() {
 	//Background Material
 	Material background(make_float3(0.6f, 0.8f, 1.0f) * 0.8f);
 	//Material background(make_float3(0));
-
+	
 	Scene* d_scene;
 	checkCudaErrors(cudaMallocManaged((void**)&d_scene, sizeof(Scene)));
 	//Scene setup

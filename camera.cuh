@@ -6,7 +6,7 @@ struct Camera {
 
 	float3 position;
 	float fov = 90.f;
-	float focusDistance = 1.f;
+	float focalLength = 1.f;
 
 protected:
 	float3 forward; //points forward
@@ -28,9 +28,9 @@ public:
 	//yMult is height/width
 	__device__ Ray getRay(float x, float y, float yMult) const {
 		//Calculate a spot on our "screen plane"
-		float3 spot = forward * focusDistance + position;
-		spot += horizontal * xfov * (x - .5f) * focusDistance;
-		spot -= vertical * xfov * yMult * (y - .5f) * focusDistance;
+		float3 spot = forward * focalLength + position;
+		spot += horizontal * xfov * (x - .5f) * focalLength;
+		spot -= vertical * xfov * yMult * (y - .5f) * focalLength;
 		return Ray(position, spot - position);
 	}
 };

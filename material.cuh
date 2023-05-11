@@ -3,6 +3,9 @@
 #include "curand_kernel.h"
 #include "scene.cuh"
 
+
+__device__ float3 randomInUnitSphere(curandState* randomState);
+
 struct Material
 {
 	bool emissive = true;
@@ -22,8 +25,7 @@ struct Material
 		ray.setOrigin(hit.position);
 		color *= diffuseColor;
 		if (curand_uniform(randomState) < roughness) {
-			float3 random = make_float3(curand_uniform(randomState), curand_uniform(randomState), curand_uniform(randomState));
-			ray.setDirection(hit.normal + 2 * (random - 0.5f));
+			ray.setDirection(hit.normal + randomInUnitSphere(randomState));
 			return true;
 		}
 		else {

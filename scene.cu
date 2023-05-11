@@ -3,6 +3,15 @@
 #include "scene.cuh"
 #include <iostream>
 
+__device__ float3 randomInUnitSphere(curandState* randomState) {
+	float3 random;
+	do {
+		random = make_float3(curand_uniform(randomState), curand_uniform(randomState), curand_uniform(randomState));
+		random = 2 * (random - 0.5f);
+	} while (random.x * random.x + random.y * random.y + random.z * random.z > 1); //TODO test performance of this
+	return random;
+}
+
 __device__ Hit Scene::raytrace(const Ray& ray, const Sphere* ignore) const {
 	Hit hit;
 	Hit currentHit;
