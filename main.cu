@@ -18,22 +18,30 @@ __global__ void renderScene(Scene* scene, ViewRender* view) {
 	curandState randomState;
 	curand_init(23984, pixelIndex, 0, &randomState);
 
-	float3 finalColor = scene->background.emissiveColor;
-	//Cast our ray
-	Ray ray = scene->camera.getRay(static_cast<float>(x) / view->width, static_cast<float>(y) / view->height, static_cast<float>(view->height) / view->width);
-	Hit hit;
-	for (int bounce = 0; bounce < view->maxBounces; bounce++) {
-		hit = scene->raytrace(ray, hit.actor);
-		if (!hit.hit) break;
-		bool continueSampling = hit.actor->material.color(hit, ray, finalColor, &randomState);
-
-		Ray sampleRay(ray);
-		for (int sample = 0; sample < view->samples && continueSampling; sample++) {
-			Hit sampleHit = scene->raytrace(sampleRay, hit.actor);
-			if (!sampleHit.hit) continue;
-			sampleHit.actor->material.color(sampleHit, sampleRay, finalColor, &randomState);
+	float3 finalColor = make_float3(0, 0, 0);
+	for (int sample = 0; sample < view->samples; sample++) {
+		float3 sampleColor = make_float3(1, 1, 1);
+		//Cast our ray
+		Ray ray = scene->camera.getRay(static_cast<float>(x) / view->width, static_cast<float>(y) / view->height, static_cast<float>(view->height) / view->width);
+		Hit hit;
+		for (int bounce = 0; bounce < view->maxBounces; bounce++) {
+			hit = scene->raytrace(ray, hit.actor);
+			if (!hit.hit) {
+				//we hit the world background
+				float sunStrength = 14;
+				float size = 0.05f;
+				float3 sunColor = make_float3(sunStrength);
+				float3 sunDir = normalize(make_float3(-1, .5f, .5));
+				float sharpness = 2.f;
+				float sunAngle = clamp((powf(dot(ray.getDirection(), sunDir), sharpness) - (1 - size)) * (1 / size), 0.f, 1.f);
+				sampleColor *= (1 - sunAngle) * scene->background.emissiveColor + sunAngle * sunColor;
+				break;
+			}
+			hit.actor->material.color(hit, ray, sampleColor, &randomState);
 		}
+		finalColor += sampleColor;
 	}
+	finalColor /= view->samples;
 
 	//Set the final color
 	//finalColor = make_float3((float) x / view->width, (float) y / view->height, 0);
@@ -55,24 +63,26 @@ int main() {
 	checkCudaErrors(cudaMallocManaged((void**)&d_view, sizeof(ViewRender)));
 	//Render settings!
 	new (d_view) ViewRender(1920, 1080, 16, 16); //be carefull with placement new....
-	d_view->maxBounces = 2;
+	d_view->maxBounces = 4;
 	d_view->samples = 1000;
 
-	Camera camera = Camera({ 0,0,1.f }, { 1,1,1 });
+	Camera camera = Camera({ 0,0,0.3f }, { 1,1,0.2f });
 
-	Sphere sun = Sphere({ -10, 5, 10 }, Material({ 10,10,10 }), 2.f);
+	Sphere lamp = Sphere({ -5, 3, 5 }, Material(make_float3(1, .5f, .5f)), 2.f);
 	Sphere earth = Sphere({ 0, 0, -2000.f }, Material({ .2f, .9f, .2f }, 1.f), 2000.f);
-	Sphere a = Sphere({ 1,1,1 }, Material({ .8f, .2f, .2f }, 1.f), 0.2f);
-	Sphere b = Sphere({ 1, 1.4f, 1 }, Material({ .2f, .2f, .8f }, 1.f), 0.2f);
-	Sphere c = Sphere({ 2,3,1 }, Material({ 1.f, 1.f, 1.f }, 1.f), 1.f);
+	Sphere a = Sphere({ 1, 1, 0.2f }, Material({ .8f, .2f, .2f }, 1.f), 0.2f);
+	Sphere b = Sphere({ 1, 1.4f, 0.2f }, Material({ .2f, .2f, .8f }, 1.f), 0.2f);
+	Sphere c = Sphere({ 5, 4, 1 }, Material({ 1.f, 1.f, 1.f }, 1.f), 1.f);
+	Sphere mirror = Sphere({ 2.4f, 2, 0.6f }, Material({ 1.f, 1.f, 1.f }, 0.f), .2f);
 
 	//Background Material
-	Material background(make_float3(0.3f, 0.3f, .6f) * 2.f);
+	Material background(make_float3(0.6f, 0.8f, 1.0f) * 0.8f);
+	//Material background(make_float3(0));
 
 	Scene* d_scene;
 	checkCudaErrors(cudaMallocManaged((void**)&d_scene, sizeof(Scene)));
 	//Scene setup
-	new (d_scene) Scene({ sun, earth, a,b,c }, camera, background);
+	new (d_scene) Scene({ earth, a,b,c, mirror }, camera, background);
 
 	dim3 blocks(d_view->width / d_view->tileSizeX + 1, d_view->height / d_view->tileSizeY + 1);
 	dim3 threads(d_view->tileSizeX, d_view->tileSizeY);
