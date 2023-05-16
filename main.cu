@@ -3,9 +3,11 @@
 #include "device_launch_parameters.h"
 #include "scene.cuh"
 #include "curand_kernel.h"
+#include <ctime>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include <iostream>
 
 __global__ void renderScene(Scene* scene, ViewRender* view) {
 	//Get the pixel position
@@ -65,6 +67,8 @@ __global__ void initScene(Scene* scene, ViewRender* view) {
 
 int main() {
 
+	std::clock_t startTime = std::clock();
+
 	ViewRender* d_view;
 	checkCudaErrors(cudaMallocManaged((void**)&d_view, sizeof(ViewRender)));
 	//Render settings!
@@ -93,9 +97,16 @@ int main() {
 	dim3 blocks(d_view->width / d_view->tileSizeX + 1, d_view->height / d_view->tileSizeY + 1);
 	dim3 threads(d_view->tileSizeX, d_view->tileSizeY);
 
+	std::cout << "Samples: " << d_view->samples << " Max Bounces: " << d_view->maxBounces << " Resolution: " << d_view->width << "x" << d_view->height << std::endl;
+	std::cout << "Setup time: " << (std::clock() - startTime) / (double) CLOCKS_PER_SEC << "s" << std::endl;
+	startTime = std::clock();
+
 	renderScene << <blocks, threads >> > (d_scene, d_view);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
+
+	std::cout << "Render time: " << (std::clock() - startTime) / (double) CLOCKS_PER_SEC << "s" << std::endl;
+	startTime = std::clock();
 
 	//Convert float based rgb in frame buffer to only 8bit rgb for the out image
 	size_t outPixelsSize = d_view->width * d_view->height * CHANNELS;
@@ -107,6 +118,7 @@ int main() {
 
 	stbi_write_jpg("out.jpg", d_view->width, d_view->height, CHANNELS, outPixels, 100);
 
+	std::cout << "Image output time: " << (std::clock() - startTime) / (double) CLOCKS_PER_SEC << "s" << std::endl;
 
 	//Cleanup
 	free(outPixels);
