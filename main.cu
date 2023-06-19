@@ -20,6 +20,13 @@ __global__ void renderScene(Scene* scene, ViewRender* view) {
 	curandState randomState;
 	curand_init(23984, pixelIndex, 0, &randomState);
 
+	//The sun
+	float sunStrength = 14;
+	float size = 0.05f;
+	float3 sunColor = make_float3(sunStrength);
+	float3 sunDir = normalize(make_float3(-1, .5f, .5));
+	float sharpness = 2.f;
+
 	float3 finalColor = make_float3(0, 0, 0);
 	for (int sample = 0; sample < view->samples; sample++) {
 
@@ -33,16 +40,12 @@ __global__ void renderScene(Scene* scene, ViewRender* view) {
 			hit = scene->raytrace(ray, hit.actor);
 			if (!hit.hit) {
 				//the world background
-				float sunStrength = 14;
-				float size = 0.05f;
-				float3 sunColor = make_float3(sunStrength);
-				float3 sunDir = normalize(make_float3(-1, .5f, .5));
-				float sharpness = 2.f;
 				float sunAngle = clamp((powf(dot(ray.getDirection(), sunDir), sharpness) - (1 - size)) * (1 / size), 0.f, 1.f);
 				sampleColor *= (1 - sunAngle) * scene->background.emissiveColor + sunAngle * sunColor;
 				break;
 			}
 			hit.actor->material.color(hit, ray, sampleColor, &randomState);
+			if (hit.actor->material.emissive) break;
 		}
 		//Failed to hit a light source
 		if (bounce >= view->maxBounces) sampleColor *= 0;
@@ -78,7 +81,7 @@ int main() {
 
 	Camera camera = Camera({ 0,0,0.3f }, { 1,1,0.2f });
 
-	Sphere lamp = Sphere({ -5, 3, 5 }, Material(make_float3(1, .5f, .5f)), 2.f);
+	Sphere lamp = Sphere({ -3, 3, 1 }, Material(make_float3(20, .5f, .5f)), .5f);
 	Sphere earth = Sphere({ 0, 0, -2000.f }, Material({ .2f, .9f, .2f }, 1.f), 2000.f);
 	Sphere a = Sphere({ 1, 1, 0.2f }, Material({ .8f, .2f, .2f }, 1.f), 0.2f);
 	Sphere b = Sphere({ 1, 1.4f, 0.2f }, Material({ .2f, .2f, .8f }, 1.f), 0.2f);
@@ -92,7 +95,7 @@ int main() {
 	Scene* d_scene;
 	checkCudaErrors(cudaMallocManaged((void**)&d_scene, sizeof(Scene)));
 	//Scene setup
-	new (d_scene) Scene({ earth, a,b,c, mirror }, camera, background);
+	new (d_scene) Scene({ earth, a,b,c, mirror, lamp }, camera, background);
 
 	dim3 blocks(d_view->width / d_view->tileSizeX + 1, d_view->height / d_view->tileSizeY + 1);
 	dim3 threads(d_view->tileSizeX, d_view->tileSizeY);
