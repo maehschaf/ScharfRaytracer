@@ -52,9 +52,11 @@ struct ViewRender
 
 	float* frameBuffer = nullptr;
 	size_t frameBufferSize = 0;
+	size_t pixelCount = 0;
 
 	__host__ ViewRender(int width, int height, int tileSizeX, int tileSizeY) : width(width), height(height), tileSizeX(tileSizeX), tileSizeY(tileSizeY) {
-		this->frameBufferSize = CHANNELS * height * width * sizeof(float);
+		this->pixelCount = CHANNELS * height * width;
+		this->frameBufferSize = this->pixelCount * sizeof(float);
 		checkCudaErrors(cudaMallocManaged((void**)&frameBuffer, frameBufferSize));
 	}
 

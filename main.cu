@@ -9,11 +9,20 @@
 #include "stb_image_write.h"
 #include <iostream>
 
+__global__ void initFramebuffer(ViewRender* view) {
+	if (blockIdx.x == 0 && threadIdx.x == 0) {
+		for (size_t i = 0; i < view->pixelCount; i++) {
+			view->frameBuffer[i] = 0.f;
+		}
+	}
+}
+
 __global__ void renderScene(Scene* scene, ViewRender* view) {
 	//Get the pixel position
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
-	if ((x >= view->width) || (y >= view->height)) return;
+	int sample = blockIdx.z * blockDim.z + threadIdx.z;
+	if ((x >= view->width) || (y >= view->height) || sample >= view->samples) return;
 	int pixelIndex = (y * view->width + x) * CHANNELS;
 
 	//Create a random state
@@ -50,22 +59,13 @@ __global__ void renderScene(Scene* scene, ViewRender* view) {
 		//Failed to hit a light source
 		if (bounce >= view->maxBounces) sampleColor *= 0;
 
-		finalColor += sampleColor;
-	}
-	finalColor /= view->samples;
+	sampleColor /= view->samples;
 
 	//Set the final color
 	//finalColor = make_float3((float) x / view->width, (float) y / view->height, 0);
-	view->frameBuffer[pixelIndex + 0] = clamp(finalColor.x, 0.f, 1.f);
-	view->frameBuffer[pixelIndex + 1] = clamp(finalColor.y, 0.f, 1.f);
-	view->frameBuffer[pixelIndex + 2] = clamp(finalColor.z, 0.f, 1.f);
-}
-
-__global__ void initScene(Scene* scene, ViewRender* view) {
-	if (blockIdx.x == 0 && threadIdx.x == 0) {
-
-
-	}
+	view->frameBuffer[pixelIndex + 0] += sampleColor.x;
+	view->frameBuffer[pixelIndex + 1] += sampleColor.y;
+	view->frameBuffer[pixelIndex + 2] += sampleColor.z;
 }
 
 int main() {
@@ -77,7 +77,7 @@ int main() {
 	//Render settings!
 	new (d_view) ViewRender(1920, 1080, 16, 16); //be carefull with placement new....
 	d_view->maxBounces = 4;
-	d_view->samples = 400;
+	d_view->samples = 40;
 
 	Camera camera = Camera({ 0,0,0.3f }, { 1,1,0.2f });
 
@@ -91,37 +91,39 @@ int main() {
 	//Background Material
 	Material background(make_float3(0.6f, 0.8f, 1.0f) * 0.8f);
 	//Material background(make_float3(0));
-	
+
 	Scene* d_scene;
 	checkCudaErrors(cudaMallocManaged((void**)&d_scene, sizeof(Scene)));
 	//Scene setup
 	new (d_scene) Scene({ earth, a,b,c, mirror, lamp }, camera, background);
 
-	dim3 blocks(d_view->width / d_view->tileSizeX + 1, d_view->height / d_view->tileSizeY + 1);
-	dim3 threads(d_view->tileSizeX, d_view->tileSizeY);
-
 	std::cout << "Samples: " << d_view->samples << " Max Bounces: " << d_view->maxBounces << " Resolution: " << d_view->width << "x" << d_view->height << std::endl;
-	std::cout << "Setup time: " << (std::clock() - startTime) / (double) CLOCKS_PER_SEC << "s" << std::endl;
+	std::cout << "Scene Setup time: " << (std::clock() - startTime) / (double)CLOCKS_PER_SEC << "s" << std::endl;
 	startTime = std::clock();
+
+	dim3 blocks(d_view->width / d_view->tileSizeX + 1, d_view->height / d_view->tileSizeY + 1, d_view->samples);
+	dim3 threads(d_view->tileSizeX, d_view->tileSizeY, 1);
+
+	initFramebuffer << <1, 1 >> > (d_view);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
 
 	renderScene << <blocks, threads >> > (d_scene, d_view);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	std::cout << "Render time: " << (std::clock() - startTime) / (double) CLOCKS_PER_SEC << "s" << std::endl;
+	std::cout << "Render time: " << (std::clock() - startTime) / (double)CLOCKS_PER_SEC << "s" << std::endl;
 	startTime = std::clock();
 
 	//Convert float based rgb in frame buffer to only 8bit rgb for the out image
-	size_t outPixelsSize = d_view->width * d_view->height * CHANNELS;
-
-	unsigned char* outPixels = (unsigned char*)malloc(outPixelsSize);
-	for (size_t i = 0; i < outPixelsSize; i++) {
-		outPixels[i] = int(d_view->frameBuffer[i] * 255);
+	unsigned char* outPixels = (unsigned char*)malloc(d_view->pixelCount);
+	for (size_t i = 0; i < d_view->pixelCount; i++) {
+		outPixels[i] = int(clamp(d_view->frameBuffer[i], 0.f, 1.f) * 255);
 	}
 
 	stbi_write_jpg("out.jpg", d_view->width, d_view->height, CHANNELS, outPixels, 100);
 
-	std::cout << "Image output time: " << (std::clock() - startTime) / (double) CLOCKS_PER_SEC << "s" << std::endl;
+	std::cout << "Image output time: " << (std::clock() - startTime) / (double)CLOCKS_PER_SEC << "s" << std::endl;
 
 	//Cleanup
 	free(outPixels);
